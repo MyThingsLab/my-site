@@ -5,7 +5,7 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![MIT](https://img.shields.io/badge/license-MIT-green)
 
-A [MyThingsLab](../mythings-core) `My[X]` tool: drafts Jekyll content for a
+A [MyThingsLab](../my-things-core) `My[X]` tool: drafts Jekyll content for a
 personal site from a content-change issue. Given an issue (label `my-site`)
 on a Jekyll repo — default `lorenzoliuzzo/lorenzoliuzzo.github.io` — it infers
 the requested `kind` (project / note / page), gathers the relevant
@@ -46,7 +46,7 @@ still succeeds rather than failing outright.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ../mythings-core -e ../my-guard -e ".[dev]"
+pip install -e ../my-things-core -e ../my-guard -e ".[dev]"
 pytest
 ```
 
