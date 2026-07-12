@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeRunner, make_site
+from conftest import fake_gh, make_site
 from mysite import cli
 
 
@@ -14,7 +14,7 @@ def test_cli_draft_noop_degrades_and_prints(
     repo = make_site(tmp_path)
 
     # Patch the `gh` boundary at the CLI's SiteKeeper construction.
-    fake = FakeRunner()
+    fake = fake_gh()
     real_make = cli._make
 
     def _make(args):  # noqa: ANN001
