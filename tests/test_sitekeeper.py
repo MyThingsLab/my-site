@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mythings.ledger import Ledger
 
-from conftest import FakeRunner, ScriptedEngine, SpyEngine, branch_file, make_site
+from conftest import ScriptedEngine, branch_file, fake_gh, make_site
 from mysite.sitekeeper import SiteKeeper
 
 _DRAFT_REPLY = json.dumps(
@@ -42,7 +42,7 @@ _FENCED_REPLY = json.dumps(
 )
 
 
-def _keeper(repo: Path, tmp_path: Path, fake: FakeRunner, **kw) -> tuple[SiteKeeper, Ledger]:
+def _keeper(repo: Path, tmp_path: Path, fake: fake_gh, **kw) -> tuple[SiteKeeper, Ledger]:
     ledger = Ledger(tmp_path / "ledger.jsonl")
     k = SiteKeeper(repo_root=repo, repo="owner/site", ledger=ledger, runner=fake, **kw)
     return k, ledger
@@ -50,7 +50,7 @@ def _keeper(repo: Path, tmp_path: Path, fake: FakeRunner, **kw) -> tuple[SiteKee
 
 def test_draft_happy_path_opens_pr_and_records_ledger(tmp_path: Path) -> None:
     repo = make_site(tmp_path)
-    fake = FakeRunner()
+    fake = fake_gh()
     k, ledger = _keeper(repo, tmp_path, fake, engine=ScriptedEngine(_DRAFT_REPLY))
 
     result = k.draft(issue=5)
@@ -81,8 +81,8 @@ def test_draft_skips_when_slug_already_exists(tmp_path: Path) -> None:
     # request the exact top-level slug that collides.
     (repo / "_notes" / "friedman-test.md").write_text("---\ntitle: X\n---\n\nexisting\n")
 
-    fake = FakeRunner(title="Friedman Test", body="revisit this note")
-    spy = SpyEngine()
+    fake = fake_gh(title="Friedman Test", body="revisit this note")
+    spy = ScriptedEngine()
     k, ledger = _keeper(repo, tmp_path, fake, engine=spy)
 
     result = k.draft(issue=5)
@@ -96,7 +96,7 @@ def test_draft_skips_when_slug_already_exists(tmp_path: Path) -> None:
 
 def test_draft_drops_files_outside_allowlist_but_still_succeeds(tmp_path: Path) -> None:
     repo = make_site(tmp_path)
-    fake = FakeRunner()
+    fake = fake_gh()
     k, ledger = _keeper(repo, tmp_path, fake, engine=ScriptedEngine(_FENCED_REPLY))
 
     result = k.draft(issue=5)
@@ -116,7 +116,7 @@ def test_draft_drops_files_outside_allowlist_but_still_succeeds(tmp_path: Path) 
 
 def test_draft_no_pr_skips_pr_creation(tmp_path: Path) -> None:
     repo = make_site(tmp_path)
-    fake = FakeRunner()
+    fake = fake_gh()
     k, _ = _keeper(repo, tmp_path, fake, engine=ScriptedEngine(_DRAFT_REPLY))
 
     result = k.draft(issue=5, no_pr=True)
@@ -128,7 +128,7 @@ def test_draft_no_pr_skips_pr_creation(tmp_path: Path) -> None:
 
 def test_draft_against_noop_engine_degrades_to_stub_page(tmp_path: Path) -> None:
     repo = make_site(tmp_path)
-    fake = FakeRunner(title="Add a project page for RayTracer", body="A ray tracing engine.")
+    fake = fake_gh(title="Add a project page for RayTracer", body="A ray tracing engine.")
     k, ledger = _keeper(repo, tmp_path, fake)  # default NoopEngine
 
     result = k.draft(issue=5)
