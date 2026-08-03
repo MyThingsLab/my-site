@@ -27,6 +27,9 @@ mysite draft --issue 12 --engine claude-cli
 
 # Point at a different repo / local checkout, skip opening a PR:
 mysite draft --issue 12 --repo owner/site --repo-root ~/site --no-pr
+
+# Draft every still-open my-site issue in one pass (the unattended/timer path).
+mysite drain --engine claude-cli
 ```
 
 Each invocation makes **at most one** Engine call. If the requested slug
@@ -34,6 +37,15 @@ already exists, the run skips before ever calling the Engine. Against the
 default `--engine noop` (zero tokens), the draft degrades to a minimal stub
 page — front matter inferred from `kind` plus the issue body verbatim — an
 honest degrade, never fabricated prose.
+
+An issue body may pin the exact write path with a `Path: <relative>.md` line
+(relative to the kind's directory, e.g. `Path: physics/quantum-mechanics/spin.md`
+for a note) — lets an enqueuer that knows the site's folder convention (tag-nested
+under `_notes/`) place the file correctly instead of falling back to a flat
+slug-of-the-title. `kind == "note"` also gets a stricter system prompt: LaTeX
+conventions, no fabricated figures/tables, and an instruction to flag genuinely
+uncertain claims instead of stating them flatly — these are exam study notes,
+not general content pages.
 
 ## Structural fence
 

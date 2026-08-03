@@ -126,6 +126,81 @@ def test_draft_no_pr_skips_pr_creation(tmp_path: Path) -> None:
     assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
 
 
+def test_draft_honors_path_directive_for_nested_notes(tmp_path: Path) -> None:
+    repo = make_site(tmp_path)
+    fake = fake_gh(
+        title="Spin",
+        body="Path: physics/quantum-mechanics/spin.md\nTags: Physics, Quantum Mechanics\n"
+        "Source material: none",
+        labels=["note"],
+    )
+    reply = json.dumps(
+        {
+            "files": {
+                "_notes/physics/quantum-mechanics/spin.md": (
+                    '---\ntitle: "Spin"\ncollection: notes\ntags:\n  - Physics\n  '
+                    "- Quantum Mechanics\n---\n\n# Spin\nDrafted body.\n"
+                )
+            },
+            "nav_patch": [],
+        }
+    )
+    k, ledger = _keeper(repo, tmp_path, fake, engine=ScriptedEngine(reply))
+
+    result = k.draft(issue=5)
+
+    assert result.outcome == "success"
+    assert result.files == ("_notes/physics/quantum-mechanics/spin.md",)
+    committed = branch_file(repo, "my-site/5", "_notes/physics/quantum-mechanics/spin.md")
+    assert "Drafted body." in committed
+
+
+def test_draft_skips_when_nested_path_directive_already_exists(tmp_path: Path) -> None:
+    repo = make_site(tmp_path)
+    nested = repo / "_notes" / "physics" / "quantum-mechanics" / "spin.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("---\ntitle: Spin\n---\n\nexisting\n")
+
+    fake = fake_gh(title="Spin", body="Path: physics/quantum-mechanics/spin.md", labels=["note"])
+    spy = ScriptedEngine()
+    k, ledger = _keeper(repo, tmp_path, fake, engine=spy)
+
+    result = k.draft(issue=5)
+
+    assert result.outcome == "skipped"
+    assert spy.calls == []
+    assert list(ledger)[0].outcome == "skipped"
+
+
+def test_draft_note_kind_uses_note_system_prompt(tmp_path: Path) -> None:
+    repo = make_site(tmp_path)
+    fake = fake_gh(title="Add a note on Kernel Methods")
+    spy = ScriptedEngine(_DRAFT_REPLY)
+    k, _ = _keeper(repo, tmp_path, fake, engine=spy)
+
+    k.draft(issue=5)
+
+    assert len(spy.calls) == 1
+    assert "study note" in spy.calls[0].system
+    assert "$...$" in spy.calls[0].system
+
+
+def test_draft_project_kind_does_not_use_note_system_prompt(tmp_path: Path) -> None:
+    repo = make_site(tmp_path)
+    fake = fake_gh(title="Add a project page for RayTracer", body="A ray tracing engine.")
+    spy = ScriptedEngine(
+        json.dumps(
+            {"files": {"_projects/raytracer.md": "---\ntitle: X\n---\n\nbody\n"}},
+        )
+    )
+    k, _ = _keeper(repo, tmp_path, fake, engine=spy)
+
+    k.draft(issue=5)
+
+    assert len(spy.calls) == 1
+    assert "study note" not in spy.calls[0].system
+
+
 def test_draft_against_noop_engine_degrades_to_stub_page(tmp_path: Path) -> None:
     repo = make_site(tmp_path)
     fake = fake_gh(title="Add a project page for RayTracer", body="A ray tracing engine.")
@@ -137,9 +212,7 @@ def test_draft_against_noop_engine_degrades_to_stub_page(tmp_path: Path) -> None
     assert result.kind == "project"
     assert result.files == ("_projects/add-a-project-page-for-raytracer.md",)
 
-    committed = branch_file(
-        repo, "my-site/5", "_projects/add-a-project-page-for-raytracer.md"
-    )
+    committed = branch_file(repo, "my-site/5", "_projects/add-a-project-page-for-raytracer.md")
     assert "Add a project page for RayTracer" in committed
     assert "A ray tracing engine." in committed
     assert list(ledger)[0].outcome == "success"
