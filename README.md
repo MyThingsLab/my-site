@@ -30,6 +30,11 @@ mysite draft --issue 12 --repo owner/site --repo-root ~/site --no-pr
 
 # Draft every still-open my-site issue in one pass (the unattended/timer path).
 mysite drain --engine claude-cli
+
+# Bulk intake: file one my-site issue per topic in a syllabus, via my-server's
+# enqueue API (POST /tools/my-site/issues). syllabus.json is a JSON array of
+# {"path", "title", "tags", "source"} (source optional).
+mysite enqueue-syllabus syllabus.json --server http://127.0.0.1:8787 --token "$MYSERVER_TOKEN"
 ```
 
 Each invocation makes **at most one** Engine call. If the requested slug

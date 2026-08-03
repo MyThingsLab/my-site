@@ -121,6 +121,51 @@ def test_cli_drain_no_open_issues(
     assert "no open" in out
 
 
+def test_cli_enqueue_syllabus_requires_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("MYSERVER_TOKEN", raising=False)
+    syllabus = tmp_path / "syllabus.json"
+    syllabus.write_text(json.dumps([{"path": "a.md", "title": "A", "tags": ["X"]}]))
+
+    code = cli.main(["enqueue-syllabus", str(syllabus)])
+
+    assert code == 1
+    assert "--token or $MYSERVER_TOKEN" in capsys.readouterr().out
+
+
+def test_cli_enqueue_syllabus_posts_each_topic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from mysite.syllabus import Enqueued
+
+    syllabus = tmp_path / "syllabus.json"
+    syllabus.write_text(
+        json.dumps(
+            [
+                {"path": "a.md", "title": "A", "tags": ["X"]},
+                {"path": "b.md", "title": "B", "tags": ["X"]},
+            ]
+        )
+    )
+
+    def fake_enqueue(topics, *, server, token, repo, post=None):  # noqa: ANN001
+        assert token == "tok"
+        return [
+            Enqueued(topic=t, issue=i + 1, url=f"https://x/{i + 1}") for i, t in enumerate(topics)
+        ]
+
+    monkeypatch.setattr(cli, "enqueue_syllabus", fake_enqueue)
+
+    code = cli.main(["enqueue-syllabus", str(syllabus), "--token", "tok"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "#1: a.md" in out
+    assert "#2: b.md" in out
+    assert "2 topic(s) enqueued." in out
+
+
 def test_cli_requires_subcommand() -> None:
     with pytest.raises(SystemExit):
         cli.main([])

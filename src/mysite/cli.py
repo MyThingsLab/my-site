@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from mythings.engine import ClaudeCLIEngine, Engine, NoopEngine
 from mythings.ledger import Ledger
 
 from mysite.sitekeeper import LABEL, Result, SiteKeeper
+from mysite.syllabus import EnqueueError, enqueue_syllabus, load_topics
 
 
 def build_engine(name: str, *, model: str | None = None) -> Engine:
@@ -79,6 +81,25 @@ def _cmd_drain(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _cmd_enqueue_syllabus(args: argparse.Namespace) -> int:
+    token = args.token or os.environ.get("MYSERVER_TOKEN")
+    if not token:
+        print("error: --token or $MYSERVER_TOKEN is required to enqueue")
+        return 1
+
+    topics = load_topics(args.syllabus)
+    try:
+        results = enqueue_syllabus(topics, server=args.server, token=token, repo=args.repo)
+    except EnqueueError as err:
+        print(f"error: {err}")
+        return 1
+
+    for result in results:
+        print(f"#{result.issue}: {result.topic.path} — {result.url}")
+    print(f"\n{len(results)} topic(s) enqueued.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="mysite",
@@ -94,10 +115,26 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(drain)
     drain.add_argument("--limit", type=int, default=100, help="max open issues to fetch")
 
+    enqueue = sub.add_parser(
+        "enqueue-syllabus", help="file one my-site issue per topic in a syllabus"
+    )
+    enqueue.add_argument("syllabus", type=Path, help="JSON array of {path, title, tags, source}")
+    enqueue.add_argument(
+        "--repo",
+        default="lorenzoliuzzo/lorenzoliuzzo.github.io",
+        help="GitHub slug owner/name (default: lorenzoliuzzo/lorenzoliuzzo.github.io)",
+    )
+    enqueue.add_argument("--server", default="http://127.0.0.1:8787", help="my-server base URL")
+    enqueue.add_argument(
+        "--token", help="my-server enqueue bearer token (default: $MYSERVER_TOKEN)"
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "draft":
         return _cmd_draft(args)
-    return _cmd_drain(args)
+    if args.cmd == "drain":
+        return _cmd_drain(args)
+    return _cmd_enqueue_syllabus(args)
 
 
 if __name__ == "__main__":
