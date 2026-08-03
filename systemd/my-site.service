@@ -1,0 +1,11 @@
+[Unit]
+Description=my-site drain -- draft every open my-site issue in one pass
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Desktop/MyThingsLab/my-site
+# Assumes the target site repo is checked out at ~/lorenzoliuzzo.github.io and
+# `gh`/`claude` are already authenticated for this user -- edit the paths below
+# if either differs. ClaudeCLIEngine shells out to whatever `claude` finds on
+# PATH; it does not read ANTHROPIC_API_KEY itself.
+ExecStart=%h/Desktop/MyThingsLab/.venv/bin/mysite drain --engine claude-cli --repo-root %h/lorenzoliuzzo.github.io --ledger %h/Desktop/MyThingsLab/my-site/.mythings/ledger.jsonl

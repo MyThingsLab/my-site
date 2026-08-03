@@ -59,6 +59,29 @@ The Engine may only write files under `_pages/`, `_notes/`, or
 Engine's reply: any file path outside the allowlist is dropped and the run
 still succeeds rather than failing outright.
 
+## Deploy: the drain timer
+
+For an unattended run (e.g. clearing an exam syllabus's worth of note issues
+over a few days with nobody around to trigger each `draft`), `systemd/my-site.
+{service,timer}` run `mysite drain --engine claude-cli` on a schedule —
+drafting every open `my-site` issue in one pass. `draft()` already skips any
+issue whose target file exists, so re-running on a timer is safe.
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/my-site.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now my-site.timer
+```
+
+The unit files assume the fleet root is checked out at
+`~/Desktop/MyThingsLab` and the target site repo at
+`~/lorenzoliuzzo.github.io`, and that `gh` and `claude` are already
+authenticated for this user — edit the paths in `my-site.service` first if
+yours differ. Each PR `my-site` opens still needs to land on `main`
+somehow; that's a separate concern for the target repo's own workflows
+(e.g. a CI-gated auto-merge), not something this timer does itself.
+
 ## Install (development)
 
 ```bash

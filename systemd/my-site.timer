@@ -1,0 +1,12 @@
+[Unit]
+Description=Draft every open my-site issue against the configured Jekyll site repo
+
+[Timer]
+# Every 2 hours rather than fleet-bookkeeping's daily cadence: this drains a
+# syllabus backlog that needs to clear inside a few days, not a background
+# tidy-up job. Adjust to taste once the backlog is caught up.
+OnCalendar=*-*-* *:00/2:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
