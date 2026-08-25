@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,22 @@ _SYSTEM = (
     "structure and style. You may only write files under _pages/, _notes/, or "
     "assets/<kind>/. Never touch _config.yml, _includes/, assets/css/, or any "
     "Ruby file. Reply with a single JSON object and nothing else."
+)
+
+# Notes are exam study material read back under time pressure, not general content
+# pages -- held to a higher bar than the shared _SYSTEM prompt above.
+_NOTE_SYSTEM = _SYSTEM + (
+    "\n\nThis request is for a study note. Hold to a higher bar:\n"
+    "- Use inline LaTeX as $...$ and display equations as $$...$$.\n"
+    '- Start the body with a single "# Title" heading matching the note\'s title, '
+    'then "##" for sections.\n'
+    "- If source material was given in the request body, draft primarily from it: "
+    "organize and clarify, never contradict it or add claims it does not support.\n"
+    "- If no source material was given, write a correct, exam-ready explanation from "
+    "your own knowledge, but where a claim is genuinely contested or you are not "
+    "confident, say so in the text rather than stating it flatly.\n"
+    "- Do not invent figures, tables, or {% include %} tags -- there is no source "
+    "asset to point them at."
 )
 
 
@@ -77,6 +94,60 @@ def _slug(text: str) -> str:
     return "".join(out).strip("-")[:60] or "page"
 
 
+def _extract_path(body: str, directory: str) -> str | None:
+    # An enqueuer that already knows the site's folder convention (e.g. tag-nested
+    # _notes/<topic>/<subtopic>/) can pin the exact write target with a "Path:" line
+    # in the issue body, instead of falling back to a flat slug-of-the-title.
+    for line in body.splitlines():
+        line = line.strip()
+        if line.lower().startswith("path:"):
+            value = line.split(":", 1)[1].strip()
+            value = value.removeprefix(f"{directory}/")
+            if not value or ".." in value.split("/"):
+                return None
+            return value if value.endswith(".md") else f"{value}.md"
+    return None
+
+
+_FRONT_MATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+_AI_GENERATED_LINE_RE = re.compile(r"^ai_generated\s*:.*$", re.MULTILINE)
+
+
+def _stamp_ai_generated(content: str) -> str:
+    # The Engine writes the whole file, front matter included, so this is a
+    # provenance stamp applied *after* the model's own text -- never something it
+    # is asked or trusted to write about itself. It has to preserve whatever else
+    # is in the block untouched, notably a `tags:` YAML list, so this edits the
+    # matched block's text in place rather than reparsing it into
+    # jekyll.split_front_matter's flat key:value dict, which would silently drop
+    # any multi-line value on the round trip back through render_front_matter.
+    match = _FRONT_MATTER_RE.match(content)
+    if match is None:
+        return content  # no front matter to stamp; _is_allowed_path already fenced the path
+
+    block = match.group(1)
+    line = "ai_generated: true"
+    block = (
+        _AI_GENERATED_LINE_RE.sub(line, block, count=1)
+        if _AI_GENERATED_LINE_RE.search(block)
+        else f"{block}\n{line}"
+    )
+    return f"---\n{block}\n---\n" + content[match.end() :]
+
+
+def _page_url(kind: str, slug: str, rel_path: str) -> str:
+    section = _KIND_DIRS[kind].lstrip("_")
+    if kind == "page":
+        return f"/{section}/{slug}/"
+    # A collection's permalink pattern is normally /:collection/:path/, so the URL
+    # tracks the file's position in the tree. A note pinned to
+    # _notes/physics/quantum-mechanics/spin.md publishes at
+    # /notes/physics/quantum-mechanics/spin/ -- not at a flat slug of its title,
+    # which would drop it out of its section in breadcrumbs and nav.
+    inner = Path(rel_path).relative_to(_KIND_DIRS[kind]).with_suffix("")
+    return f"/{section}/{inner.as_posix()}/"
+
+
 def _infer_kind(issue: _Issue) -> str:
     for label in issue.labels:
         if label in _KIND_DIRS:
@@ -122,11 +193,13 @@ class SiteKeeper:
             return self._fail(None, None, f"could not read issue #{issue}: {err}")
 
         kind = _infer_kind(topic)
-        slug = _slug(topic.title)
         directory = _KIND_DIRS[kind]
+        path_directive = _extract_path(topic.body, directory)
+        slug = Path(path_directive).stem if path_directive else _slug(topic.title)
+        rel_path = f"{directory}/{path_directive}" if path_directive else f"{directory}/{slug}.md"
 
-        if (self.repo_root / directory / f"{slug}.md").exists():
-            detail = f"a page already exists at {directory}/{slug}.md"
+        if (self.repo_root / rel_path).exists():
+            detail = f"a page already exists at {rel_path}"
             self._comment(
                 issue,
                 f"_{detail} — close this issue or file a follow-up to edit it instead._",
@@ -139,12 +212,12 @@ class SiteKeeper:
 
         reply = self.engine.run(
             EngineRequest(
-                system=_SYSTEM,
-                prompt=self._prompt(topic, kind, nav_text, anchor_path, anchor_text),
+                system=_NOTE_SYSTEM if kind == "note" else _SYSTEM,
+                prompt=self._prompt(topic, kind, nav_text, anchor_path, anchor_text, rel_path),
                 context={"issue": issue, "kind": kind, "anchor_path": anchor_path or ""},
             )
         )
-        files, nav_patch = self._parse_reply(reply.text, topic, kind, slug)
+        files, nav_patch = self._parse_reply(reply.text, topic, kind, slug, rel_path)
 
         pr = None
         if not no_pr and files:
@@ -191,7 +264,13 @@ class SiteKeeper:
         return None, ""
 
     def _prompt(
-        self, topic: _Issue, kind: str, nav_text: str, anchor_path: str | None, anchor_text: str
+        self,
+        topic: _Issue,
+        kind: str,
+        nav_text: str,
+        anchor_path: str | None,
+        anchor_text: str,
+        rel_path: str,
     ) -> str:
         section = _guess_nav_section(nav_text, kind)
         nav_block = "\n".join(find_nav_section(nav_text, section)) if section else ""
@@ -199,6 +278,8 @@ class SiteKeeper:
             f"Issue #{topic.number}: {topic.title}",
             f"Kind: {kind}",
             f"\nRequest body:\n{topic.body.strip()}",
+            f'\nWrite the file at exactly this path: "{rel_path}" — use it verbatim as the '
+            "key in the files object.",
         ]
         if anchor_path:
             lines.append(f"\nStyle anchor ({anchor_path}):\n{anchor_text}")
@@ -215,11 +296,11 @@ class SiteKeeper:
     # ---- engine reply parsing / structural fence -----------------------
 
     def _parse_reply(
-        self, text: str, topic: _Issue, kind: str, slug: str
+        self, text: str, topic: _Issue, kind: str, slug: str, rel_path: str
     ) -> tuple[dict[str, str], list[dict[str, object]]]:
         obj = _parse_json_object(text)
         if obj is None:
-            return self._raw_stub(topic, kind, slug)
+            return self._raw_stub(topic, kind, slug, rel_path)
 
         raw_files = obj.get("files")
         files: dict[str, str] = {}
@@ -228,7 +309,7 @@ class SiteKeeper:
                 path = str(path)
                 if not _is_allowed_path(path):  # structural fence: drop, don't fail
                     continue
-                files[path] = str(content)
+                files[path] = _stamp_ai_generated(str(content))
 
         nav_patch: list[dict[str, object]] = []
         for item in obj.get("nav_patch") or []:
@@ -240,23 +321,35 @@ class SiteKeeper:
                 nav_patch.append({"section": section, "entry": entry})
 
         if not files:
-            return self._raw_stub(topic, kind, slug)
+            return self._raw_stub(topic, kind, slug, rel_path)
         return files, nav_patch
 
     def _raw_stub(
-        self, topic: _Issue, kind: str, slug: str
+        self, topic: _Issue, kind: str, slug: str, rel_path: str
     ) -> tuple[dict[str, str], list[dict[str, object]]]:
         # Honest degrade against NoopEngine (or an unparsable reply): a minimal
         # stub page, not fabricated prose.
-        directory = _KIND_DIRS[kind]
-        fields = {"title": topic.title, "layout": "single" if kind == "page" else kind}
-        permalink = f"/{directory.lstrip('_')}/{slug}/"
-        fields["permalink"] = permalink
+        #
+        # No `layout` key. It used to write the kind itself ("note", "project"),
+        # which is not a layout any Jekyll theme defines -- the target site's
+        # _config.yml defaults already set one per scope, and a wrong override
+        # fails *quietly*: Jekyll logs one build warning, still exits 0, and emits
+        # a page with no theme chrome at all. A stub that reaches main through a
+        # PR gated only on a green build would ship exactly that. Writing nothing
+        # lets the site decide, which is also the only thing that generalises
+        # across target repos.
+        url = _page_url(kind, slug, rel_path)
+        fields = {"title": topic.title, "ai_generated": "true"}
+        # Same reasoning for the URL: a collection publishes at a permalink
+        # pattern derived from where the file sits, so pinning a flat one here
+        # would override it and strip a nested note out of its section. _pages has
+        # no such pattern, so a page still needs its permalink written out.
+        if kind == "page":
+            fields["permalink"] = url
         body = topic.body.strip() or f"Draft placeholder for {topic.title}."
         content = render_front_matter(fields, body)
-        path = f"{directory}/{slug}.md"
-        nav_patch = [{"section": "main", "entry": {"title": topic.title, "url": permalink}}]
-        return {path: content}, nav_patch
+        nav_patch = [{"section": "main", "entry": {"title": topic.title, "url": url}}]
+        return {rel_path: content}, nav_patch
 
     # ---- github / git helpers ------------------------------------------
 
@@ -362,8 +455,12 @@ class SiteKeeper:
 
     def _fail(self, slug: str | None, kind: str | None, detail: str) -> Result:
         self.ledger.record(
-            tool="mysite", kind="site_change", outcome="failure", detail=detail,
-            slug=slug, page_kind=kind,
+            tool="mysite",
+            kind="site_change",
+            outcome="failure",
+            detail=detail,
+            slug=slug,
+            page_kind=kind,
         )
         return Result("failure", slug, kind, None, detail)
 
