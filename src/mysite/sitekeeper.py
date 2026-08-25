@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,6 +107,45 @@ def _extract_path(body: str, directory: str) -> str | None:
                 return None
             return value if value.endswith(".md") else f"{value}.md"
     return None
+
+
+_FRONT_MATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+_AI_GENERATED_LINE_RE = re.compile(r"^ai_generated\s*:.*$", re.MULTILINE)
+
+
+def _stamp_ai_generated(content: str) -> str:
+    # The Engine writes the whole file, front matter included, so this is a
+    # provenance stamp applied *after* the model's own text -- never something it
+    # is asked or trusted to write about itself. It has to preserve whatever else
+    # is in the block untouched, notably a `tags:` YAML list, so this edits the
+    # matched block's text in place rather than reparsing it into
+    # jekyll.split_front_matter's flat key:value dict, which would silently drop
+    # any multi-line value on the round trip back through render_front_matter.
+    match = _FRONT_MATTER_RE.match(content)
+    if match is None:
+        return content  # no front matter to stamp; _is_allowed_path already fenced the path
+
+    block = match.group(1)
+    line = "ai_generated: true"
+    block = (
+        _AI_GENERATED_LINE_RE.sub(line, block, count=1)
+        if _AI_GENERATED_LINE_RE.search(block)
+        else f"{block}\n{line}"
+    )
+    return f"---\n{block}\n---\n" + content[match.end() :]
+
+
+def _page_url(kind: str, slug: str, rel_path: str) -> str:
+    section = _KIND_DIRS[kind].lstrip("_")
+    if kind == "page":
+        return f"/{section}/{slug}/"
+    # A collection's permalink pattern is normally /:collection/:path/, so the URL
+    # tracks the file's position in the tree. A note pinned to
+    # _notes/physics/quantum-mechanics/spin.md publishes at
+    # /notes/physics/quantum-mechanics/spin/ -- not at a flat slug of its title,
+    # which would drop it out of its section in breadcrumbs and nav.
+    inner = Path(rel_path).relative_to(_KIND_DIRS[kind]).with_suffix("")
+    return f"/{section}/{inner.as_posix()}/"
 
 
 def _infer_kind(issue: _Issue) -> str:
@@ -269,7 +309,7 @@ class SiteKeeper:
                 path = str(path)
                 if not _is_allowed_path(path):  # structural fence: drop, don't fail
                     continue
-                files[path] = str(content)
+                files[path] = _stamp_ai_generated(str(content))
 
         nav_patch: list[dict[str, object]] = []
         for item in obj.get("nav_patch") or []:
@@ -289,13 +329,26 @@ class SiteKeeper:
     ) -> tuple[dict[str, str], list[dict[str, object]]]:
         # Honest degrade against NoopEngine (or an unparsable reply): a minimal
         # stub page, not fabricated prose.
-        directory = _KIND_DIRS[kind]
-        fields = {"title": topic.title, "layout": "single" if kind == "page" else kind}
-        permalink = f"/{directory.lstrip('_')}/{slug}/"
-        fields["permalink"] = permalink
+        #
+        # No `layout` key. It used to write the kind itself ("note", "project"),
+        # which is not a layout any Jekyll theme defines -- the target site's
+        # _config.yml defaults already set one per scope, and a wrong override
+        # fails *quietly*: Jekyll logs one build warning, still exits 0, and emits
+        # a page with no theme chrome at all. A stub that reaches main through a
+        # PR gated only on a green build would ship exactly that. Writing nothing
+        # lets the site decide, which is also the only thing that generalises
+        # across target repos.
+        url = _page_url(kind, slug, rel_path)
+        fields = {"title": topic.title, "ai_generated": "true"}
+        # Same reasoning for the URL: a collection publishes at a permalink
+        # pattern derived from where the file sits, so pinning a flat one here
+        # would override it and strip a nested note out of its section. _pages has
+        # no such pattern, so a page still needs its permalink written out.
+        if kind == "page":
+            fields["permalink"] = url
         body = topic.body.strip() or f"Draft placeholder for {topic.title}."
         content = render_front_matter(fields, body)
-        nav_patch = [{"section": "main", "entry": {"title": topic.title, "url": permalink}}]
+        nav_patch = [{"section": "main", "entry": {"title": topic.title, "url": url}}]
         return {rel_path: content}, nav_patch
 
     # ---- github / git helpers ------------------------------------------
