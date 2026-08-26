@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from mythings.http import http_get
 
 # Bulk intake: turn a syllabus (a list of topics) into one my-site-labeled issue
 # per topic via my-server's enqueue API, so the rest of the pipeline (draft/drain)
@@ -75,10 +76,8 @@ def build_issue(topic: Topic) -> tuple[str, str]:
 
 
 def default_post(url: str, data: bytes, headers: dict[str, str]) -> bytes:
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- caller-supplied server URL
-            return response.read()
+        return http_get(url, data=data, headers=headers)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:300]
         raise EnqueueError(f"enqueue failed ({exc.code}): {detail}") from exc
