@@ -4,17 +4,11 @@ import argparse
 import os
 from pathlib import Path
 
-from mythings.engine import ClaudeCLIEngine, Engine, NoopEngine
+from mythings.engine import build_engine_from_args
 from mythings.ledger import Ledger
 
 from mysite.sitekeeper import LABEL, Result, SiteKeeper
 from mysite.syllabus import EnqueueError, enqueue_syllabus, load_topics
-
-
-def build_engine(name: str, *, model: str | None = None) -> Engine:
-    if name == "claude-cli":
-        return ClaudeCLIEngine(model=model)
-    return NoopEngine()
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -51,7 +45,7 @@ def _make(args: argparse.Namespace) -> SiteKeeper:
         repo=args.repo,
         ledger=Ledger(args.ledger),
         base=args.base,
-        engine=build_engine(args.engine, model=args.engine_model),
+        engine=build_engine_from_args(args),
     )
 
 
