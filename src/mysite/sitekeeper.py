@@ -438,8 +438,8 @@ class SiteKeeper:
         files: tuple[str, ...],
     ) -> None:
         self.ledger.record(
-            tool="mysite",
-            kind="site_change",
+            tool=LABEL,
+            kind="code",
             outcome=outcome,
             detail=detail,
             slug=slug,
@@ -455,8 +455,8 @@ class SiteKeeper:
 
     def _fail(self, slug: str | None, kind: str | None, detail: str) -> Result:
         self.ledger.record(
-            tool="mysite",
-            kind="site_change",
+            tool=LABEL,
+            kind="code",
             outcome="failure",
             detail=detail,
             slug=slug,

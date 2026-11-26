@@ -69,7 +69,7 @@ def test_draft_happy_path_opens_pr_and_records_ledger(tmp_path: Path) -> None:
     assert "url: /notes/kernel-methods/" in nav
 
     entry = list(ledger)[0]
-    assert entry.kind == "site_change"
+    assert entry.kind == "code"
     assert entry.outcome == "success"
     assert entry.data["pr"] == 7
     assert entry.data["files_written"] == ["_notes/kernel-methods.md"]
