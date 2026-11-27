@@ -75,7 +75,7 @@ systemctl --user enable --now my-site.timer
 ```
 
 The unit files assume the fleet root is checked out at
-`~/Desktop/MyThingsLab` and the target site repo at
+`~/MyThingsLab` and the target site repo at
 `~/lorenzoliuzzo.github.io`, and that `gh` and `claude` are already
 authenticated for this user — edit the paths in `my-site.service` first if
 yours differ. Each PR `my-site` opens still needs to land on `main`
